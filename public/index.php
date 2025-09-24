@@ -31,12 +31,33 @@ try {
         if ($vin === '') throw new RuntimeException('vin required');
         $data = $client->findByVin($vin);
         echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+
     } elseif ($path === '/oem') {
         $article = trim($_GET['article'] ?? '');
         $brand   = trim($_GET['brand'] ?? '');
         if ($article === '') throw new RuntimeException('article required');
         $data = $client->findOem($article, $brand ?: null);
         echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+
+    } elseif ($path === '/diag') {
+        // Диагностика OEM-доступа и окружения
+        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
+        $cats = $oem->listCatalogs();
+        $count = is_array($cats) ? count($cats) : 0;
+
+        // Запишем в логи Railway для наглядности
+        error_log('diag: listCatalogs count=' . $count);
+
+        echo json_encode([
+            'ok' => true,
+            'service' => 'laximo',
+            'php' => PHP_VERSION,
+            'soap' => extension_loaded('soap'),
+            'login_set' => (bool)$login,
+            'catalogs_count' => $count,
+            'catalogs' => $cats, // список доступных OEM-каталогов
+        ], JSON_UNESCAPED_UNICODE);
+
     } else {
         echo json_encode(['ok'=>true, 'service'=>'laximo']);
     }
