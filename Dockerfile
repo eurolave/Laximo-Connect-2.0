@@ -1,11 +1,13 @@
 FROM php:8.2-cli
 
 RUN apt-get update && apt-get install -y \
-    libxml2-dev git unzip \ && docker-php-ext-install soap \ && rm -rf /var/lib/apt/lists/*
+    libxml2-dev git unzip \
+ && docker-php-ext-install soap \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Composer
+# Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 # Dependencies
@@ -15,5 +17,6 @@ RUN composer install --no-dev --prefer-dist --no-interaction
 # App
 COPY . .
 
-EXPOSE 8081
-CMD ["php", "-S", "0.0.0.0:8081", "-t", "public"]
+# В Railway порт приходит через $PORT
+ENV PORT=8081
+CMD ["sh","-lc","php -S 0.0.0.0:${PORT} -t public"]
