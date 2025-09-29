@@ -6,6 +6,10 @@ use App\LaximoClient;
 
 require __DIR__.'/../vendor/autoload.php';
 
+ini_set('log_errors', '1');
+ini_set('error_log', 'php://stdout'); // всё улетит в Railway Runtime Logs
+
+
 $dotenv = Dotenv::createImmutable(dirname(__DIR__));
 if (file_exists(dirname(__DIR__).'/.env')) {
     $dotenv->load();
@@ -24,6 +28,38 @@ if (!$login || !$pass) {
 
 $client = new LaximoClient($login, $pass);
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
+
+if ($path === '/_echo') {
+    echo json_encode(['path' => $path, 'query' => $_GET], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($path === '/_diag/ping-ws') {
+    $host = 'ws.laximo.ru';
+    $ip = gethostbyname($host);
+
+    $tcp_ok = false;
+    $err = null;
+    $t0 = microtime(true);
+    $fp = @stream_socket_client("ssl://{$host}:443", $errno, $errstr, 5, STREAM_CLIENT_CONNECT);
+    if ($fp) {
+        $tcp_ok = true;
+        fclose($fp);
+    } else {
+        $err = "{$errno}: {$errstr}";
+    }
+    $ms = (int)((microtime(true) - $t0) * 1000);
+
+    echo json_encode([
+        'host' => $host,
+        'resolved_ip' => $ip,
+        'tcp_443' => $tcp_ok,
+        'latency_ms' => $ms,
+        'error' => $err,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 
 try {
     if ($path === '/vin') {
