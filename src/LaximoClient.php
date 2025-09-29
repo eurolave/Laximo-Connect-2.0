@@ -22,4 +22,23 @@ class LaximoClient {
         $res = $this->am->findOem($article, $brand ?? '');
         return is_array($res) ? $res : [];
     }
+
+public function listCatalogs(): array
+{
+    error_log('[LAXIMO] listCatalogs() start');
+    $res = $this->oem->listCatalogs();
+    error_log('[LAXIMO] listCatalogs() done');
+    return $res;
+}
+
+public function findVehicleByVin(string $vin): array
+{
+    error_log("[LAXIMO] findVehicleByVin({$vin}) start");
+    $res = $this->oem->findVehicleByVin($vin);
+    error_log("[LAXIMO] findVehicleByVin({$vin}) done");
+    return $res;
+}
+
+
+    
 }
