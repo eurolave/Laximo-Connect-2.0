@@ -53,6 +53,16 @@ final class LaximoClient
         return is_array($res) ? $res : [];
     }
 
+public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
+{
+    return $this->oem->queryButch([
+        \GuayaquilLib\Oem::findVehicleByOem($catalog, $oem, $locale)
+    ]);
+}
+
+
+
+    
     /**
      * Насильно направляем SDK на нужный endpoint (ws.laximo.ru).
      * Пытаемся сначала через «публичные» сеттеры, затем через приватные поля и SoapClient->__setLocation().
