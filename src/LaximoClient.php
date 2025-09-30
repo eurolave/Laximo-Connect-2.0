@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App;
 
+use GuayaquilLib\Oem as OemCmd;
 use GuayaquilLib\ServiceOem;
 use GuayaquilLib\ServiceAm;
 
@@ -10,126 +11,75 @@ final class LaximoClient
 {
     private ServiceOem $oem;
     private ServiceAm  $am;
+    private bool $debug;
 
     public function __construct(string $login, string $password)
     {
         $this->oem = new ServiceOem($login, $password);
         $this->am  = new ServiceAm($login, $password);
+        $this->debug = (\getenv('LOG_LEVEL') === 'debug');
 
-        // Жёстко задаём endpoint (если нужен): по умолчанию ws.laximo.ru
-        $host = getenv('LAXIMO_HOST') ?: 'https://ws.laximo.ru';
-        $this->forceHost($host);
+        // НИЧЕГО не форсим: пусть SDK сам выберет правильный endpoint для учётки.
+        // Если когда-то понадобится — можно вернуть forceHost(), но это ломало каталоги у тебя.
     }
 
-    /** VIN → данные автомобиля (OEM) */
-    public function findByVin(string $vin): array
+    /** Список доступных OEM-каталогов (через batch, чтобы вернуть «как есть») */
+    public function listCatalogs(string $locale = 'ru_RU'): array
     {
-        error_log("[LAXIMO] findByVin({$vin})");
-        $res = $this->oem->findVehicleByVin($vin);
-        return is_array($res) ? $res : [];
+        $this->log("listCatalogs(locale={$locale})");
+        return $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
     }
 
-    /** VIN → то же, что и findByVin (синоним, если удобнее такое имя) */
-    public function findVehicleByVin(string $vin): array
+    /** VIN → данные об авто (OEM). По умолчанию ru_RU, можно указать свою локаль */
+    public function findByVin(string $vin, string $locale = 'ru_RU'): array
     {
-        error_log("[LAXIMO] findVehicleByVin({$vin})");
-        $res = $this->oem->findVehicleByVin($vin);
-        return is_array($res) ? $res : [];
+        $this->log("findByVin(vin={$vin}, locale={$locale})");
+        // Через batch используем точную команду из SDK:
+        return $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
     }
 
-    /** Поиск запчастей по артикулу (Aftermarket) */
+    /** Синоним */
+    public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
+    {
+        return $this->findByVin($vin, $locale);
+    }
+
+    /** Применимость детали к авто по OEM + каталогу */
+    public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
+    {
+        $this->log("findApplicableVehicles(catalog={$catalog}, oem={$oem}, locale={$locale})");
+        return $this->oem->queryButch([ OemCmd::findVehicleByOem($catalog, $oem, $locale) ]);
+    }
+
+    /** Поиск запчастей по артикулу (Aftermarket / DOC). brand опционален */
     public function findOem(string $article, ?string $brand = null): array
     {
-        error_log("[LAXIMO] findOem(article={$article}, brand=" . ($brand ?? '') . ")");
+        $this->log("findOem(article={$article}, brand=" . ($brand ?? '') . ")");
         $res = $this->am->findOem($article, $brand ?? '');
-        return is_array($res) ? $res : [];
+        // SDK может вернуть массив объектов — просто отдаём «как есть»
+        return \is_array($res) ? $res : (array)$res;
     }
 
-    /** Список доступных OEM-каталогов */
-    public function listCatalogs(): array
+    // ───────────────────────── Диагностика / «сырые» батчи ─────────────────────
+
+    /** Сырой batch VIN (удобно для отладки структуры ответа) */
+    public function rawBatchFindByVin(string $vin, string $locale = 'ru_RU'): array
     {
-        error_log('[LAXIMO] listCatalogs()');
-        $res = $this->oem->listCatalogs();
-        return is_array($res) ? $res : [];
+        return $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
     }
 
-public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
-{
-    return $this->oem->queryButch([
-        \GuayaquilLib\Oem::findVehicleByOem($catalog, $oem, $locale)
-    ]);
-}
-
-
-
-    
-    /**
-     * Насильно направляем SDK на нужный endpoint (ws.laximo.ru).
-     * Пытаемся сначала через «публичные» сеттеры, затем через приватные поля и SoapClient->__setLocation().
-     */
-    private function forceHost(string $host): void
+    /** Сырой batch ListCatalogs */
+    public function rawBatchListCatalogs(string $locale = 'ru_RU'): array
     {
-        try {
-            // Попробуем с OEM
-            $this->rewriteEndpoint($this->oem, $host);
-            // И с AM
-            $this->rewriteEndpoint($this->am,  $host);
-        } catch (\Throwable $e) {
-            error_log('[LAXIMO][forceHost] ' . $e->getMessage());
-        }
+        return $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
     }
 
-    /** Вспомогательно: перенастройка endpoint внутри объекта библиотеки */
-    private function rewriteEndpoint(object $svc, string $host): void
+    // ───────────────────────────────────────────────────────────────────────────
+
+    private function log(string $msg): void
     {
-        $ref = new \ReflectionObject($svc);
-
-        // 1) Если есть явные сеттеры — используем их
-        foreach (['setHost', 'setEndpoint', 'setUrl'] as $m) {
-            if ($ref->hasMethod($m)) {
-                $ref->getMethod($m)->invoke($svc, $host);
-            }
-        }
-
-        // 2) Ищем внутренний wrapper/soapClient
-        $wrapper = null;
-        foreach (['soap', 'client', 'soapClient', 'wrapper'] as $propName) {
-            if ($ref->hasProperty($propName)) {
-                $p = $ref->getProperty($propName);
-                $p->setAccessible(true);
-                $wrapper = $p->getValue($svc);
-                if ($wrapper) break;
-            }
-        }
-
-        if ($wrapper) {
-            $wRef = new \ReflectionObject($wrapper);
-
-            // 2a) Сеттеры в обёртке
-            foreach (['setHost', 'setEndpoint', 'setUrl'] as $m) {
-                if ($wRef->hasMethod($m)) {
-                    $wRef->getMethod($m)->invoke($wrapper, $host);
-                }
-            }
-            // 2b) Популярные поля для адреса
-            foreach (['host', 'url', 'endpoint', 'baseUrl'] as $pn) {
-                if ($wRef->hasProperty($pn)) {
-                    $pp = $wRef->getProperty($pn);
-                    $pp->setAccessible(true);
-                    $pp->setValue($wrapper, $host);
-                }
-            }
-            // 2c) SoapClient->__setLocation()
-            foreach (['soap', 'client', 'soapClient'] as $pn) {
-                if ($wRef->hasProperty($pn)) {
-                    $pp = $wRef->getProperty($pn);
-                    $pp->setAccessible(true);
-                    $sc = $pp->getValue($wrapper);
-                    if ($sc instanceof \SoapClient) {
-                        try { @$sc->__setLocation($host); } catch (\Throwable) {}
-                    }
-                }
-            }
+        if ($this->debug) {
+            \error_log('[LAXIMO] ' . $msg);
         }
     }
 }
