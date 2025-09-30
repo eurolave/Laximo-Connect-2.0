@@ -9,6 +9,10 @@ require __DIR__.'/../vendor/autoload.php';
 ini_set('log_errors', '1');
 ini_set('error_log', 'php://stdout'); // всё улетит в Railway Runtime Logs
 
+// (опционально CORS, убери если не нужно фронту)
+// header('Access-Control-Allow-Origin: *');
+// header('Access-Control-Allow-Methods: GET, OPTIONS');
+// if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
 $dotenv = Dotenv::createImmutable(dirname(__DIR__));
 if (file_exists(dirname(__DIR__).'/.env')) {
@@ -17,11 +21,15 @@ if (file_exists(dirname(__DIR__).'/.env')) {
 
 header('Content-Type: application/json; charset=utf-8');
 
+// 🔧 СНАЧАЛА определяем $path, чтобы использовать его ниже
+$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
+
+// Читаем креды (и через $_ENV, и через getenv)
 $login = $_ENV['LAXIMO_LOGIN']    ?? getenv('LAXIMO_LOGIN')    ?: '';
 $pass  = $_ENV['LAXIMO_PASSWORD'] ?? getenv('LAXIMO_PASSWORD') ?: '';
 
-
-if (($path ?? '') === '/_diag/creds') {
+// ─── Диагностика до создания клиента ───────────────────────────────────────────
+if ($path === '/_diag/creds') {
   echo json_encode([
     'login_len' => strlen($login),
     'pass_len'  => strlen($pass),
@@ -33,8 +41,12 @@ if (($path ?? '') === '/_diag/creds') {
 if ($path === '/_diag/login') {
     try {
         $oem = new \GuayaquilLib\ServiceOem($login, $pass);
-        $cats = $oem->listCatalogs(); // простая команда — отличный «ping»
-        echo json_encode(['ok'=>true, 'catalogs_count'=>is_array($cats)?count($cats):0, 'data'=>$cats], JSON_UNESCAPED_UNICODE);
+        $cats = $oem->listCatalogs(); // простой ping
+        echo json_encode([
+          'ok'=>true,
+          'catalogs_count'=>is_array($cats)?count($cats):0,
+          'data'=>$cats
+        ], JSON_UNESCAPED_UNICODE);
     } catch (\GuayaquilLib\exceptions\AccessDeniedException $e) {
         http_response_code(401);
         echo json_encode(['ok'=>false, 'code'=>'E_ACCESSDENIED', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -47,16 +59,6 @@ if ($path === '/_diag/login') {
     }
     exit;
 }
-
-
-if (!$login || !$pass) {
-    http_response_code(500);
-    echo json_encode(['ok'=>false, 'error'=>'Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)']);
-    exit;
-}
-
-$client = new LaximoClient($login, $pass);
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
 
 if ($path === '/_echo') {
     echo json_encode(['path' => $path, 'query' => $_GET], JSON_UNESCAPED_UNICODE);
@@ -89,18 +91,34 @@ if ($path === '/_diag/ping-ws') {
     exit;
 }
 
+// health (удобно для мониторинга)
+if ($path === '/health') {
+    echo json_encode(['ok' => true, 'php' => PHP_VERSION]);
+    exit;
+}
 
+// Если кредов нет — сразу ошибка
+if (!$login || !$pass) {
+    http_response_code(500);
+    echo json_encode(['ok'=>false, 'error'=>'Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)']);
+    exit;
+}
+
+// Создаём клиент
+$client = new LaximoClient($login, $pass);
+
+// ─── Бизнес-маршруты ───────────────────────────────────────────────────────────
 try {
     if ($path === '/vin') {
         $vin = trim($_GET['vin'] ?? '');
-        if ($vin === '') throw new RuntimeException('vin required');
+        if ($vin === '') throw new \RuntimeException('vin required');
         $data = $client->findByVin($vin);
         echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
 
     } elseif ($path === '/oem') {
         $article = trim($_GET['article'] ?? '');
         $brand   = trim($_GET['brand'] ?? '');
-        if ($article === '') throw new RuntimeException('article required');
+        if ($article === '') throw new \RuntimeException('article required');
         $data = $client->findOem($article, $brand ?: null);
         echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
 
@@ -110,7 +128,6 @@ try {
         $cats = $oem->listCatalogs();
         $count = is_array($cats) ? count($cats) : 0;
 
-        // Запишем в логи Railway для наглядности
         error_log('diag: listCatalogs count=' . $count);
 
         echo json_encode([
@@ -120,13 +137,13 @@ try {
             'soap' => extension_loaded('soap'),
             'login_set' => (bool)$login,
             'catalogs_count' => $count,
-            'catalogs' => $cats, // список доступных OEM-каталогов
+            'catalogs' => $cats,
         ], JSON_UNESCAPED_UNICODE);
 
     } else {
         echo json_encode(['ok'=>true, 'service'=>'laximo']);
     }
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     http_response_code(400);
     echo json_encode(['ok'=>false, 'error'=>$e->getMessage()]);
 }
