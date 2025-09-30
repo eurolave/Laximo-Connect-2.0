@@ -1,44 +1,53 @@
-# TG Bot — GPT + Подбор по VIN (Laximo-Connect-2.0)
+# php-laximo
 
-Готовый бот для Telegram с меню команд:
-- **/vin** — подбор по VIN через ваш REST (`/vin?vin=...&locale=...`)
-- **/gpt** — GPT-чат
-- **/reset** — сброс контекста GPT
-- **/help** — справка
+Мини-сервис на PHP для проксирования запросов к **Laximo** через библиотеку [`laximo/guayaquillib`].
+Экспонирует HTTP-эндпоинты, которые удобно дёргать из вашего Telegram-бота (Node.js или любой другой):
 
-## Быстрый старт
+- `GET /vin?vin=WAU...` — поиск автомобиля по VIN (OEM/Laximo.CAT)
+- `GET /oem?article=90471-PX4-000&brand=HONDA` — поиск запчастей по артикулу (Aftermarket/Laximo.DOC)
+
+## Быстрый старт (локально)
 
 ```bash
 cp .env.example .env
-# впишите TELEGRAM_TOKEN, OPENAI_API_KEY, LAXIMO_BASE_URL (на ваш хост)
-npm i
-npm run dev          # режим long polling
-# или вебхук
-npm run dev:webhook  # требует PUBLIC URL в WEBHOOK_PUBLIC_URL
+# заполните LAXIMO_LOGIN и LAXIMO_PASSWORD
+composer install
+php -S 0.0.0.0:8081 -t public
+# сервис будет на http://localhost:8081
 ```
 
-### Переменные окружения
-- `TELEGRAM_TOKEN` — токен бота
-- `LAXIMO_BASE_URL` — базовый URL вашего сервиса Laximo-Connect-2.0 (без завершающего /)
-- `DEFAULT_LOCALE` — по умолчанию `ru_RU`
-- `OPENAI_API_KEY` — ключ OpenAI
-- `OPENAI_MODEL` — модель (по умолчанию `gpt-4o-mini`)
-- `USE_RESPONSES_API=1` — чтобы использовать Responses API вместо Chat Completions
-- `WEBHOOK_PUBLIC_URL` и `PORT` — для режима вебхука
+Примеры запросов:
+```
+curl "http://localhost:8081/vin?vin=WAUZZZ4M6JD010702"
+curl "http://localhost:8081/oem?article=90471-PX4-000&brand=HONDA"
+```
 
-## Что делает
-- При получении VIN (команда `/vin` или просто отправка VIN) — обращается к `GET /vin` вашего REST и:
-  - отправляет краткое резюме полей;
-  - прикрепляет полный JSON файлом.
-- Любой другой текст — уходит в GPT-чат, с контекстом на последние 12 сообщений. Команда `/reset` очищает контекст.
+## Docker
+
+```bash
+docker build -t php-laximo .
+docker run --rm -p 8081:8081 \
+  -e LAXIMO_LOGIN=your_login -e LAXIMO_PASSWORD=your_password php-laximo
+```
+
+## Переменные окружения
+
+- `LAXIMO_LOGIN` — логин Laximo
+- `LAXIMO_PASSWORD` — пароль Laximo
+- `APP_DEBUG` — `true/false` (необязательно)
 
 ## Структура
-- `src/index.js` — входная точка, запуск long polling или webhook, установка меню
-- `src/telegram.js` — маршрутизация команд и сообщений
-- `src/laximoClient.js` — запрос к вашему REST
-- `src/gpt.js` — простой стейт для GPT-диалога и вызов OpenAI
-- `src/formatters.js` — генерация краткого резюме ответа VIN
-- `src/utils.js` — утилиты
+```
+php-laximo/
+├─ public/
+│  └─ index.php         # HTTP-эндпоинты
+├─ src/
+│  └─ LaximoClient.php  # обёртка над guayaquillib
+├─ composer.json
+├─ .env.example
+├─ .gitignore
+└─ Dockerfile
+```
 
 ## Лицензия
 MIT
