@@ -21,6 +21,17 @@ $login = $_ENV['LAXIMO_LOGIN']    ?? getenv('LAXIMO_LOGIN')    ?: '';
 $pass  = $_ENV['LAXIMO_PASSWORD'] ?? getenv('LAXIMO_PASSWORD') ?: '';
 
 
+if (($path ?? '') === '/_diag/creds') {
+  echo json_encode([
+    'login_len' => strlen($login),
+    'pass_len'  => strlen($pass),
+    'login_mask'=> substr($login,0,2).'***'.substr($login,-2),
+  ], JSON_UNESCAPED_UNICODE);
+  exit;
+}
+
+
+
 if (!$login || !$pass) {
     http_response_code(500);
     echo json_encode(['ok'=>false, 'error'=>'Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)']);
