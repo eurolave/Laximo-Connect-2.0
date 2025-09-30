@@ -1,165 +1,215 @@
 <?php
 declare(strict_types=1);
 
-use Dotenv\Dotenv;
 use App\LaximoClient;
+use Dotenv\Dotenv;
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__ . '/../vendor/autoload.php';
 
+/**
+ * ────────────────────────────── Boot ──────────────────────────────
+ */
 ini_set('log_errors', '1');
-ini_set('error_log', 'php://stdout'); // всё улетит в Railway Runtime Logs
-
-// (опционально CORS, убери если не нужно фронту)
-// header('Access-Control-Allow-Origin: *');
-// header('Access-Control-Allow-Methods: GET, OPTIONS');
-// if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
-
-$dotenv = Dotenv::createImmutable(dirname(__DIR__));
-if (file_exists(dirname(__DIR__).'/.env')) {
-    $dotenv->load();
-}
+ini_set('error_log', 'php://stdout');
 
 header('Content-Type: application/json; charset=utf-8');
 
-// 🔧 СНАЧАЛА определяем $path, чтобы использовать его ниже
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
+const JSON_FLAGS = JSON_UNESCAPED_UNICODE
+                 | JSON_INVALID_UTF8_SUBSTITUTE;
 
-// Читаем креды (и через $_ENV, и через getenv)
+/** tiny helpers */
+function respond(array $payload, int $code = 200): never {
+    http_response_code($code);
+    echo json_encode($payload, JSON_FLAGS);
+    exit;
+}
+function ok(array $payload = []): never {
+    respond(['ok' => true] + $payload, 200);
+}
+function fail(string $message, int $code = 400, array $extra = []): never {
+    respond(['ok' => false, 'error' => $message] + $extra, $code);
+}
+function get_path(): string {
+    $p = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+    return is_string($p) ? $p : '/';
+}
+function q(string $key, ?string $default = null): ?string {
+    $val = $_GET[$key] ?? $default;
+    if ($val === null) return null;
+    return trim((string)$val);
+}
+
+/**
+ * ──────────────────────── Optional CORS (env flag) ────────────────────────
+ * set ENABLE_CORS=1 in env to turn this on
+ */
+if (($_ENV['ENABLE_CORS'] ?? getenv('ENABLE_CORS') ?: '') === '1') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+}
+
+/**
+ * ─────────────────────── Load .env if present ───────────────────────
+ */
+try {
+    $root = dirname(__DIR__);
+    if (is_file($root.'/.env')) {
+        Dotenv::createImmutable($root)->load();
+    }
+} catch (Throwable $e) {
+    // не критично — просто отметим в лог
+    error_log('dotenv load warning: ' . $e->getMessage());
+}
+
+/**
+ * ──────────────────────── Read credentials ────────────────────────
+ */
 $login = $_ENV['LAXIMO_LOGIN']    ?? getenv('LAXIMO_LOGIN')    ?: '';
 $pass  = $_ENV['LAXIMO_PASSWORD'] ?? getenv('LAXIMO_PASSWORD') ?: '';
 
-// ─── Диагностика до создания клиента ───────────────────────────────────────────
+$path = get_path();
+
+/**
+ * ─────────────────────── Diagnostic routes ───────────────────────
+ */
 if ($path === '/_diag/creds') {
-  echo json_encode([
-    'login_len' => strlen($login),
-    'pass_len'  => strlen($pass),
-    'login_mask'=> substr($login,0,2).'***'.substr($login,-2),
-  ], JSON_UNESCAPED_UNICODE);
-  exit;
+    $mask = static function (string $s): string {
+        $len = strlen($s);
+        return $len <= 4 ? str_repeat('*', $len) : (substr($s, 0, 2) . '***' . substr($s, -2));
+    };
+    ok([
+        'login_len'  => strlen($login),
+        'pass_len'   => strlen($pass),
+        'login_mask' => $mask($login),
+    ]);
 }
 
 if ($path === '/_diag/login') {
     try {
-        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
-        $cats = $oem->listCatalogs(); // простой ping
-        echo json_encode([
-          'ok'=>true,
-          'catalogs_count'=>is_array($cats)?count($cats):0,
-          'data'=>$cats
-        ], JSON_UNESCAPED_UNICODE);
+        $oem  = new \GuayaquilLib\ServiceOem($login, $pass);
+        $cats = $oem->listCatalogs(); // ping
+        ok([
+            'catalogs_count' => is_array($cats) ? count($cats) : 0,
+            'data'           => $cats,
+        ]);
     } catch (\GuayaquilLib\exceptions\AccessDeniedException $e) {
-        http_response_code(401);
-        echo json_encode(['ok'=>false, 'code'=>'E_ACCESSDENIED', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+        fail($e->getMessage(), 401, ['code' => 'E_ACCESSDENIED']);
     } catch (\GuayaquilLib\exceptions\TooManyRequestsException $e) {
-        http_response_code(429);
-        echo json_encode(['ok'=>false, 'code'=>'E_TOO_MANY_REQUESTS', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
-    } catch (\Throwable $e) {
-        http_response_code(500);
-        echo json_encode(['ok'=>false, 'code'=>'UNKNOWN', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+        fail($e->getMessage(), 429, ['code' => 'E_TOO_MANY_REQUESTS']);
+    } catch (Throwable $e) {
+        fail($e->getMessage(), 500, ['code' => 'UNKNOWN']);
     }
-    exit;
 }
 
 if ($path === '/_echo') {
-    echo json_encode(['path' => $path, 'query' => $_GET], JSON_UNESCAPED_UNICODE);
-    exit;
+    ok(['path' => $path, 'query' => $_GET]);
 }
 
 if ($path === '/_diag/ping-ws') {
     $host = 'ws.laximo.ru';
-    $ip = gethostbyname($host);
+    $ip   = gethostbyname($host);
 
-    $tcp_ok = false;
-    $err = null;
-    $t0 = microtime(true);
-    $fp = @stream_socket_client("ssl://{$host}:443", $errno, $errstr, 5, STREAM_CLIENT_CONNECT);
+    $tcpOk = false;
+    $err   = null;
+    $t0    = microtime(true);
+    $fp    = @stream_socket_client("ssl://{$host}:443", $errno, $errstr, 5, STREAM_CLIENT_CONNECT);
     if ($fp) {
-        $tcp_ok = true;
+        $tcpOk = true;
         fclose($fp);
     } else {
         $err = "{$errno}: {$errstr}";
     }
-    $ms = (int)((microtime(true) - $t0) * 1000);
+    $ms = (int) ((microtime(true) - $t0) * 1000);
 
-    echo json_encode([
-        'host' => $host,
+    respond([
+        'host'        => $host,
         'resolved_ip' => $ip,
-        'tcp_443' => $tcp_ok,
-        'latency_ms' => $ms,
-        'error' => $err,
-    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-    exit;
+        'tcp_443'     => $tcpOk,
+        'latency_ms'  => $ms,
+        'error'       => $err,
+    ], 200);
 }
 
-// health (удобно для мониторинга)
 if ($path === '/health') {
-    echo json_encode(['ok' => true, 'php' => PHP_VERSION]);
-    exit;
+    ok(['php' => PHP_VERSION]);
 }
 
-// Если кредов нет — сразу ошибка
-if (!$login || !$pass) {
-    http_response_code(500);
-    echo json_encode(['ok'=>false, 'error'=>'Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)']);
-    exit;
+/**
+ * ─────────────────── Guard: credentials present ───────────────────
+ */
+if ($login === '' || $pass === '') {
+    fail('Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)', 500);
 }
 
-// Создаём клиент
+/**
+ * ─────────────────────────── App client ───────────────────────────
+ */
 $client = new LaximoClient($login, $pass);
 
-// ─── Бизнес-маршруты ───────────────────────────────────────────────────────────
+/**
+ * ─────────────────────────── Routes ───────────────────────────
+ */
 try {
     if ($path === '/vin') {
-        $vin = trim($_GET['vin'] ?? '');
-        if ($vin === '') throw new \RuntimeException('vin required');
-        $data = $client->findByVin($vin);
-        echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+        $vin    = q('vin', '');
+        $locale = q('locale', 'ru_RU') ?? 'ru_RU';
+        if ($vin === '') {
+            fail('vin required', 400);
         }
-    elseif ($path === '/applicable') {
-    $catalog = trim($_GET['catalog'] ?? '');
-    $oem     = trim($_GET['oem'] ?? '');
-    $locale  = $_GET['locale'] ?? 'ru_RU';
+        $data = $client->findVehicleByVin($vin, $locale);
+        ok(['data' => $data, 'vin' => $vin, 'locale' => $locale]);
 
-    if ($catalog === '' || $oem === '') {
-        http_response_code(400);
-        echo json_encode(['ok'=>false,'error'=>'catalog and oem are required']);
-        exit;
-    }
+    } elseif ($path === '/applicable') {
+        $catalog = q('catalog', '');
+        $oem     = q('oem', '');
+        $locale  = q('locale', 'ru_RU') ?? 'ru_RU';
 
-    $data = $client->findApplicableVehicles($catalog, $oem, $locale);
-    echo json_encode(['ok'=>true, 'catalog'=>$catalog, 'oem'=>$oem, 'locale'=>$locale, 'data'=>$data], JSON_UNESCAPED_UNICODE);
-    exit;
+        if ($catalog === '' || $oem === '') {
+            fail('catalog and oem are required', 400);
+        }
 
+        $data = $client->findApplicableVehicles($catalog, $oem, $locale);
+        ok([
+            'catalog' => $catalog,
+            'oem'     => $oem,
+            'locale'  => $locale,
+            'data'    => $data,
+        ]);
 
     } elseif ($path === '/oem') {
-        $article = trim($_GET['article'] ?? '');
-        $brand   = trim($_GET['brand'] ?? '');
-        if ($article === '') throw new \RuntimeException('article required');
+        $article = q('article', '');
+        $brand   = q('brand'); // may be null/empty
+        if ($article === '') {
+            fail('article required', 400);
+        }
         $data = $client->findOem($article, $brand ?: null);
-        echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+        ok(['data' => $data, 'article' => $article, 'brand' => $brand]);
 
     } elseif ($path === '/diag') {
-        // Диагностика OEM-доступа и окружения
-        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
-        $cats = $oem->listCatalogs();
+        $oem   = new \GuayaquilLib\ServiceOem($login, $pass);
+        $cats  = $oem->listCatalogs();
         $count = is_array($cats) ? count($cats) : 0;
 
         error_log('diag: listCatalogs count=' . $count);
 
-        echo json_encode([
-            'ok' => true,
-            'service' => 'laximo',
-            'php' => PHP_VERSION,
-            'soap' => extension_loaded('soap'),
-            'login_set' => (bool)$login,
-            'catalogs_count' => $count,
-            'catalogs' => $cats,
-        ], JSON_UNESCAPED_UNICODE);
+        ok([
+            'service'         => 'laximo',
+            'php'             => PHP_VERSION,
+            'soap'            => extension_loaded('soap'),
+            'login_set'       => (bool) $login,
+            'catalogs_count'  => $count,
+            'catalogs'        => $cats,
+        ]);
 
     } else {
-        echo json_encode(['ok'=>true, 'service'=>'laximo']);
+        ok(['service' => 'laximo']);
     }
-} catch (\Throwable $e) {
-    http_response_code(400);
-    echo json_encode(['ok'=>false, 'error'=>$e->getMessage()]);
+} catch (Throwable $e) {
+    // по умолчанию считаем ошибкой запроса; если нужно — меняй на 500
+    fail($e->getMessage(), 400);
 }
