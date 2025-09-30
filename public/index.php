@@ -17,8 +17,9 @@ if (file_exists(dirname(__DIR__).'/.env')) {
 
 header('Content-Type: application/json; charset=utf-8');
 
-$login = $_ENV['LAXIMO_LOGIN'] ?? '';
-$pass  = $_ENV['LAXIMO_PASSWORD'] ?? '';
+$login = $_ENV['LAXIMO_LOGIN']    ?? getenv('LAXIMO_LOGIN')    ?: '';
+$pass  = $_ENV['LAXIMO_PASSWORD'] ?? getenv('LAXIMO_PASSWORD') ?: '';
+
 
 if (!$login || !$pass) {
     http_response_code(500);
