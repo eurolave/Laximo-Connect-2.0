@@ -114,6 +114,22 @@ try {
         if ($vin === '') throw new \RuntimeException('vin required');
         $data = $client->findByVin($vin);
         echo json_encode(['ok'=>true, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+        }
+    elseif ($path === '/applicable') {
+    $catalog = trim($_GET['catalog'] ?? '');
+    $oem     = trim($_GET['oem'] ?? '');
+    $locale  = $_GET['locale'] ?? 'ru_RU';
+
+    if ($catalog === '' || $oem === '') {
+        http_response_code(400);
+        echo json_encode(['ok'=>false,'error'=>'catalog and oem are required']);
+        exit;
+    }
+
+    $data = $client->findApplicableVehicles($catalog, $oem, $locale);
+    echo json_encode(['ok'=>true, 'catalog'=>$catalog, 'oem'=>$oem, 'locale'=>$locale, 'data'=>$data], JSON_UNESCAPED_UNICODE);
+    exit;
+
 
     } elseif ($path === '/oem') {
         $article = trim($_GET['article'] ?? '');
