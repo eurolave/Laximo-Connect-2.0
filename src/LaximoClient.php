@@ -6,98 +6,147 @@ namespace App;
 use GuayaquilLib\Oem as OemCmd;
 use GuayaquilLib\ServiceOem;
 use GuayaquilLib\ServiceAm;
+use JsonSerializable;
 use SimpleXMLElement;
+use Traversable;
+use RuntimeException;
 
 final class LaximoClient
 {
     private ServiceOem $oem;
     private ServiceAm  $am;
-    private bool $debug;
 
     public function __construct(string $login, string $password)
     {
         $this->oem = new ServiceOem($login, $password);
         $this->am  = new ServiceAm($login, $password);
-        $this->debug = (\getenv('LOG_LEVEL') === 'debug');
     }
 
+    /**
+     * Получить список каталогов.
+     * @return array<mixed>
+     */
     public function listCatalogs(string $locale = 'ru_RU'): array
     {
-        $res = $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
+        $res = $this->oemBatch([OemCmd::listCatalogs($locale)]);
         return $this->normalize($res);
     }
 
-    public function findByVin(string $vin, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
-        return $this->normalize($res);
-    }
-
+    /**
+     * Поиск авто по VIN (основной метод).
+     * @return array<mixed>
+     */
     public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
     {
-        return $this->findByVin($vin, $locale);
-    }
-
-    public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oem->queryButch([ OemCmd::findVehicleByOem($catalog, $oem, $locale) ]);
+        $res = $this->oemBatch([OemCmd::findVehicleByVin($vin, $locale)]);
         return $this->normalize($res);
     }
 
-    /** Aftermarket/DOC */
+    /**
+     * @deprecated Используйте findVehicleByVin()
+     * @return array<mixed>
+     */
+    public function findByVin(string $vin, string $locale = 'ru_RU'): array
+    {
+        return $this->findVehicleByVin($vin, $locale);
+    }
+
+    /**
+     * Найти применимые авто по OEM-номеру.
+     * @return array<mixed>
+     */
+    public function findApplicableVehicles(string $catalog, string $oemNumber, string $locale = 'ru_RU'): array
+    {
+        $res = $this->oemBatch([OemCmd::findVehicleByOem($catalog, $oemNumber, $locale)]);
+        return $this->normalize($res);
+    }
+
+    /**
+     * Aftermarket/DOC — поиск кроссов по артикулу.
+     * @return array<mixed>
+     */
     public function findOem(string $article, ?string $brand = null): array
     {
         $res = $this->am->findOem($article, $brand ?? '');
         return $this->normalize($res);
     }
 
-    /** Универсальная нормализация в «чистый» массив для JSON */
-    private function normalize(mixed $v): mixed
+    /**
+     * Универсальная нормализация в «чистый» массив/скаляр для JSON.
+     * @return mixed
+     */
+    private function normalize(mixed $value): mixed
     {
-        // 1) SimpleXMLElement → массив
-        if ($v instanceof SimpleXMLElement) {
-            return json_decode(json_encode($v, JSON_UNESCAPED_UNICODE), true);
+        // 1) SimpleXMLElement → массив (через json_encode для сохранения вложенности)
+        if ($value instanceof SimpleXMLElement) {
+            /** @var mixed $decoded */
+            $decoded = json_decode(json_encode($value, JSON_UNESCAPED_UNICODE), true);
+            return $this->normalize($decoded);
         }
 
-        // 2) Массив → рекурсивно
-        if (is_array($v)) {
+        // 2) Traversable → массив
+        if ($value instanceof Traversable) {
+            $tmp = [];
+            foreach ($value as $k => $v) {
+                $tmp[$this->cleanKey($k)] = $this->normalize($v);
+            }
+            return $tmp;
+        }
+
+        // 3) Массив → рекурсивно
+        if (is_array($value)) {
             $out = [];
-            foreach ($v as $k => $val) {
-                $out[$this->cleanKey($k)] = $this->normalize($val);
+            foreach ($value as $k => $v) {
+                $out[$this->cleanKey($k)] = $this->normalize($v);
             }
             return $out;
         }
 
-        // 3) Объект → раскрываем свойства (в т.ч. приватные), чистим ключи, рекурсивно
-        if (is_object($v)) {
-            // Попробуем jsonSerialize(), если есть
-            if ($v instanceof \JsonSerializable) {
-                return $this->normalize($v->jsonSerialize());
+        // 4) Объект → jsonSerialize() или раскрытие свойств
+        if (is_object($value)) {
+            if ($value instanceof JsonSerializable) {
+                return $this->normalize($value->jsonSerialize());
             }
-            // В противном случае раскрываем объект в массив
-            $arr = (array) $v;
+            // В явный массив со снятием приватных префиксов
             $out = [];
-            foreach ($arr as $k => $val) {
-                $out[$this->cleanKey($k)] = $this->normalize($val);
+            foreach ((array)$value as $k => $v) {
+                $out[$this->cleanKey($k)] = $this->normalize($v);
             }
             return $out;
         }
 
-        // 4) Скаляр/NULL
-        return $v;
+        // 5) Скаляр/NULL → как есть
+        return $value;
     }
 
-    /** Чистим служебные префиксы приватных свойств: "\0*\0prop" → "prop" */
-    private function cleanKey(string|int $k): string|int
+    /**
+     * Чистим служебные префиксы приватных свойств: "\0*\0prop" или "\0Class\0prop" → "prop".
+     * @param string|int $key
+     * @return string|int
+     */
+    private function cleanKey(string|int $key): string|int
     {
-        if (!is_string($k)) return $k;
-        // Убираем префиксы приватных/защищённых свойств: "\0*\0" или "\0Class\0"
-        if (str_starts_with($k, "\0")) {
-            $pos = strrpos($k, "\0");
-            if ($pos !== false) {
-                $k = substr($k, $pos + 1);
-            }
+        if (!is_string($key)) {
+            return $key;
         }
-        return $k;
+        // удаляем префикс до последнего \0
+        // пример: "\0*\0prop" или "\0Class\0prop" → "prop"
+        return preg_replace('/^\x00(?:[^\x00]+)\x00/', '', $key) ?? $key;
+    }
+
+    /**
+     * Единая точка вызова пакетных OEM-команд.
+     * Оборачиваем, чтобы было проще менять реализацию (и не размножать "queryButch").
+     * @param array<mixed> $commands
+     * @return mixed
+     */
+    private function oemBatch(array $commands): mixed
+    {
+        try {
+            // В библиотеке метод называется именно queryButch — оставлено как есть.
+            return $this->oem->queryButch($commands);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('OEM batch request failed: '.$e->getMessage(), 0, $e);
+        }
     }
 }
