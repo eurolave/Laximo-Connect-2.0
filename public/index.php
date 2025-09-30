@@ -30,6 +30,23 @@ if (($path ?? '') === '/_diag/creds') {
   exit;
 }
 
+if ($path === '/_diag/login') {
+    try {
+        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
+        $cats = $oem->listCatalogs(); // простая команда — отличный «ping»
+        echo json_encode(['ok'=>true, 'catalogs_count'=>is_array($cats)?count($cats):0, 'data'=>$cats], JSON_UNESCAPED_UNICODE);
+    } catch (\GuayaquilLib\exceptions\AccessDeniedException $e) {
+        http_response_code(401);
+        echo json_encode(['ok'=>false, 'code'=>'E_ACCESSDENIED', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+    } catch (\GuayaquilLib\exceptions\TooManyRequestsException $e) {
+        http_response_code(429);
+        echo json_encode(['ok'=>false, 'code'=>'E_TOO_MANY_REQUESTS', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+    } catch (\Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok'=>false, 'code'=>'UNKNOWN', 'message'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
 
 
 if (!$login || !$pass) {
