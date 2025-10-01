@@ -41,7 +41,6 @@ function q(string $key, ?string $default = null): ?string {
 
 /**
  * ──────────────────────── Optional CORS (env flag) ────────────────────────
- * set ENABLE_CORS=1 in env to turn this on
  */
 if (($_ENV['ENABLE_CORS'] ?? getenv('ENABLE_CORS') ?: '') === '1') {
     header('Access-Control-Allow-Origin: *');
@@ -62,7 +61,6 @@ try {
         Dotenv::createImmutable($root)->load();
     }
 } catch (Throwable $e) {
-    // не критично — просто отметим в лог
     error_log('dotenv load warning: ' . $e->getMessage());
 }
 
@@ -180,35 +178,46 @@ try {
             'locale'  => $locale,
             'data'    => $data,
         ]);
-      } elseif ($path === '/categories') {
-    $catalog   = trim($_GET['catalog'] ?? '');
-    $vehicleId = trim($_GET['vehicleId'] ?? '0');
-    $ssd       = trim($_GET['ssd'] ?? '');
-    // опционально: ?all=1 -> прокинем -1
-    $all       = isset($_GET['all']) && $_GET['all'] !== '0';
 
-    if ($catalog === '' || $ssd === '') {
-        http_response_code(400);
-        echo json_encode(['ok'=>false,'error'=>'catalog and ssd are required']);
-        exit;
-    }
+    } elseif ($path === '/categories') {
+        $catalog   = q('catalog', '');
+        $vehicleId = q('vehicleId', '0') ?? '0';
+        $ssd       = q('ssd', '');
+        $all       = q('all'); // ?all=1 -> полный список
 
-    // Вариант А: обычный список
-    $data = $client->listCategories($catalog, $vehicleId, $ssd);
+        if ($catalog === '' || $ssd === '') {
+            fail('catalog and ssd are required', 400);
+        }
 
-    // Вариант B: полный список (иерархия) — отправляем CategoryId = -1 через execCustomOperation
-    if ($all) {
-        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
-        $data = $oem->queryButch([
-            \GuayaquilLib\Oem::listCategories($catalog, $vehicleId, $ssd, -1) // <- четвёртым -1
+        if ($all === '1') {
+            // Требует публичный метод клиента listCategoriesAll(...)
+            $data = $client->listCategoriesAll($catalog, $vehicleId, $ssd);
+        } else {
+            $data = $client->listCategories($catalog, $vehicleId, $ssd);
+        }
+
+        ok(['catalog' => $catalog, 'vehicleId' => $vehicleId, 'data' => $data]);
+
+    } elseif ($path === '/units') {
+        $catalog    = q('catalog', '');
+        $vehicleId  = q('vehicleId', '0') ?? '0';
+        $ssd        = q('ssd', '');
+        $categoryId = q('categoryId', null);
+
+        if ($catalog === '' || $ssd === '') {
+            fail('catalog and ssd are required', 400);
+        }
+        if ($categoryId === null || !is_numeric($categoryId)) {
+            fail('categoryId is required (int)', 400);
+        }
+
+        $data = $client->listUnits($catalog, $vehicleId, $ssd, (int)$categoryId);
+        ok([
+            'catalog'    => $catalog,
+            'vehicleId'  => $vehicleId,
+            'categoryId' => (int)$categoryId,
+            'data'       => $data
         ]);
-        $data = (new \App\LaximoClient($login,$pass))->normalize($data);
-    }
-
-    echo json_encode(['ok'=>true, 'data'=>$data, 'catalog'=>$catalog, 'vehicleId'=>$vehicleId], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
 
     } elseif ($path === '/oem') {
         $article = q('article', '');
@@ -239,6 +248,5 @@ try {
         ok(['service' => 'laximo']);
     }
 } catch (Throwable $e) {
-    // по умолчанию считаем ошибкой запроса; если нужно — меняй на 500
     fail($e->getMessage(), 400);
 }
