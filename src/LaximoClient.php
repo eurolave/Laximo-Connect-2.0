@@ -26,6 +26,26 @@ final class LaximoClient
      * Получить список каталогов.
      * @return array<mixed>
      */
+public function listCategories(string $catalog, string $vehicleId, string $ssd /*, string $locale = 'ru_RU' */): array
+{
+    // В SDK эта команда идёт без locale. Если очень нужно — локаль задаётся глобально при создании клиента, 
+    // либо через отдельные вызовы; но в примере — 3 аргумента.
+    $res = $this->oem->queryButch([
+        OemCmd::listCategories($catalog, $vehicleId, $ssd)
+    ]);
+    return $this->normalize($res);
+}
+
+public function listUnits(string $catalog, string $vehicleId, string $ssd, int $categoryId /*, string $locale = 'ru_RU' */): array
+{
+    $res = $this->oem->queryButch([
+        OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId)
+    ]);
+    return $this->normalize($res);
+}
+
+
+    
     public function listCatalogs(string $locale = 'ru_RU'): array
     {
         $res = $this->oemBatch([OemCmd::listCatalogs($locale)]);
