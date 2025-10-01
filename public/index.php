@@ -180,6 +180,35 @@ try {
             'locale'  => $locale,
             'data'    => $data,
         ]);
+      } elseif ($path === '/categories') {
+    $catalog   = trim($_GET['catalog'] ?? '');
+    $vehicleId = trim($_GET['vehicleId'] ?? '0');
+    $ssd       = trim($_GET['ssd'] ?? '');
+    // опционально: ?all=1 -> прокинем -1
+    $all       = isset($_GET['all']) && $_GET['all'] !== '0';
+
+    if ($catalog === '' || $ssd === '') {
+        http_response_code(400);
+        echo json_encode(['ok'=>false,'error'=>'catalog and ssd are required']);
+        exit;
+    }
+
+    // Вариант А: обычный список
+    $data = $client->listCategories($catalog, $vehicleId, $ssd);
+
+    // Вариант B: полный список (иерархия) — отправляем CategoryId = -1 через execCustomOperation
+    if ($all) {
+        $oem = new \GuayaquilLib\ServiceOem($login, $pass);
+        $data = $oem->queryButch([
+            \GuayaquilLib\Oem::listCategories($catalog, $vehicleId, $ssd, -1) // <- четвёртым -1
+        ]);
+        $data = (new \App\LaximoClient($login,$pass))->normalize($data);
+    }
+
+    echo json_encode(['ok'=>true, 'data'=>$data, 'catalog'=>$catalog, 'vehicleId'=>$vehicleId], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 
     } elseif ($path === '/oem') {
         $article = q('article', '');
