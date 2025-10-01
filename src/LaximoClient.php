@@ -6,167 +6,120 @@ namespace App;
 use GuayaquilLib\Oem as OemCmd;
 use GuayaquilLib\ServiceOem;
 use GuayaquilLib\ServiceAm;
-use JsonSerializable;
 use SimpleXMLElement;
-use Traversable;
-use RuntimeException;
 
 final class LaximoClient
 {
     private ServiceOem $oem;
     private ServiceAm  $am;
+    private bool $debug;
 
     public function __construct(string $login, string $password)
     {
         $this->oem = new ServiceOem($login, $password);
         $this->am  = new ServiceAm($login, $password);
+        $this->debug = (\getenv('LOG_LEVEL') === 'debug');
     }
 
-    /**
-     * Получить список каталогов.
-     * @return array<mixed>
-     */
-public function listCategories(string $catalog, string $vehicleId, string $ssd /*, string $locale = 'ru_RU' */): array
-{
-    // В SDK эта команда идёт без locale. Если очень нужно — локаль задаётся глобально при создании клиента, 
-    // либо через отдельные вызовы; но в примере — 3 аргумента.
-    $res = $this->oem->queryButch([
-        OemCmd::listCategories($catalog, $vehicleId, $ssd)
-    ]);
-    return $this->normalize($res);
-}
-
-public function listUnits(string $catalog, string $vehicleId, string $ssd, int $categoryId /*, string $locale = 'ru_RU' */): array
-{
-    $res = $this->oem->queryButch([
-        OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId)
-    ]);
-    return $this->normalize($res);
-}
-
-
-    
     public function listCatalogs(string $locale = 'ru_RU'): array
     {
-        $res = $this->oemBatch([OemCmd::listCatalogs($locale)]);
+        $res = $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
         return $this->normalize($res);
     }
 
-    /**
-     * Поиск авто по VIN (основной метод).
-     * @return array<mixed>
-     */
-    public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oemBatch([OemCmd::findVehicleByVin($vin, $locale)]);
-        return $this->normalize($res);
-    }
-
-    /**
-     * @deprecated Используйте findVehicleByVin()
-     * @return array<mixed>
-     */
     public function findByVin(string $vin, string $locale = 'ru_RU'): array
     {
-        return $this->findVehicleByVin($vin, $locale);
-    }
-
-    /**
-     * Найти применимые авто по OEM-номеру.
-     * @return array<mixed>
-     */
-    public function findApplicableVehicles(string $catalog, string $oemNumber, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oemBatch([OemCmd::findVehicleByOem($catalog, $oemNumber, $locale)]);
+        $res = $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
         return $this->normalize($res);
     }
 
-    /**
-     * Aftermarket/DOC — поиск кроссов по артикулу.
-     * @return array<mixed>
-     */
+    public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
+    {
+        return $this->findByVin($vin, $locale);
+    }
+
+    public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
+    {
+        $res = $this->oem->queryButch([ OemCmd::findVehicleByOem($catalog, $oem, $locale) ]);
+        return $this->normalize($res);
+    }
+
+    /** Aftermarket/DOC */
     public function findOem(string $article, ?string $brand = null): array
     {
         $res = $this->am->findOem($article, $brand ?? '');
         return $this->normalize($res);
     }
 
-    /**
-     * Универсальная нормализация в «чистый» массив/скаляр для JSON.
-     * @return mixed
-     */
-    private function normalize(mixed $value): mixed
+    /** ───────────── Категории / Узлы ───────────── */
+
+    /** Список категорий: listCategories(catalog, vehicleId, ssd) */
+    public function listCategories(string $catalog, string $vehicleId, string $ssd): array
     {
-        // 1) SimpleXMLElement → массив (через json_encode для сохранения вложенности)
-        if ($value instanceof SimpleXMLElement) {
-            /** @var mixed $decoded */
-            $decoded = json_decode(json_encode($value, JSON_UNESCAPED_UNICODE), true);
-            return $this->normalize($decoded);
+        $res = $this->oem->queryButch([
+            OemCmd::listCategories($catalog, $vehicleId, $ssd)
+        ]);
+        return $this->normalize($res);
+    }
+
+    /** Полный список категорий (иерархия): четвёртым аргументом передаём -1 */
+    public function listCategoriesAll(string $catalog, string $vehicleId, string $ssd): array
+    {
+        $res = $this->oem->queryButch([
+            OemCmd::listCategories($catalog, $vehicleId, $ssd, -1)
+        ]);
+        return $this->normalize($res);
+    }
+
+    /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
+    public function listUnits(string $catalog, string $vehicleId, string $ssd, int $categoryId): array
+    {
+        $res = $this->oem->queryButch([
+            OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId)
+        ]);
+        return $this->normalize($res);
+    }
+
+    /** Универсальная нормализация в «чистый» массив для JSON */
+    private function normalize(mixed $v): mixed
+    {
+        if ($v instanceof SimpleXMLElement) {
+            return json_decode(json_encode($v, JSON_UNESCAPED_UNICODE), true);
         }
 
-        // 2) Traversable → массив
-        if ($value instanceof Traversable) {
-            $tmp = [];
-            foreach ($value as $k => $v) {
-                $tmp[$this->cleanKey($k)] = $this->normalize($v);
-            }
-            return $tmp;
-        }
-
-        // 3) Массив → рекурсивно
-        if (is_array($value)) {
+        if (is_array($v)) {
             $out = [];
-            foreach ($value as $k => $v) {
-                $out[$this->cleanKey($k)] = $this->normalize($v);
+            foreach ($v as $k => $val) {
+                $out[$this->cleanKey($k)] = $this->normalize($val);
             }
             return $out;
         }
 
-        // 4) Объект → jsonSerialize() или раскрытие свойств
-        if (is_object($value)) {
-            if ($value instanceof JsonSerializable) {
-                return $this->normalize($value->jsonSerialize());
+        if (is_object($v)) {
+            if ($v instanceof \JsonSerializable) {
+                return $this->normalize($v->jsonSerialize());
             }
-            // В явный массив со снятием приватных префиксов
+            $arr = (array) $v;
             $out = [];
-            foreach ((array)$value as $k => $v) {
-                $out[$this->cleanKey($k)] = $this->normalize($v);
+            foreach ($arr as $k => $val) {
+                $out[$this->cleanKey($k)] = $this->normalize($val);
             }
             return $out;
         }
 
-        // 5) Скаляр/NULL → как есть
-        return $value;
+        return $v;
     }
 
-    /**
-     * Чистим служебные префиксы приватных свойств: "\0*\0prop" или "\0Class\0prop" → "prop".
-     * @param string|int $key
-     * @return string|int
-     */
-    private function cleanKey(string|int $key): string|int
+    /** Чистим служебные префиксы приватных свойств: "\0*\0prop" → "prop" */
+    private function cleanKey(string|int $k): string|int
     {
-        if (!is_string($key)) {
-            return $key;
+        if (!is_string($k)) return $k;
+        if (str_starts_with($k, "\0")) {
+            $pos = strrpos($k, "\0");
+            if ($pos !== false) {
+                $k = substr($k, $pos + 1);
+            }
         }
-        // удаляем префикс до последнего \0
-        // пример: "\0*\0prop" или "\0Class\0prop" → "prop"
-        return preg_replace('/^\x00(?:[^\x00]+)\x00/', '', $key) ?? $key;
-    }
-
-    /**
-     * Единая точка вызова пакетных OEM-команд.
-     * Оборачиваем, чтобы было проще менять реализацию (и не размножать "queryButch").
-     * @param array<mixed> $commands
-     * @return mixed
-     */
-    private function oemBatch(array $commands): mixed
-    {
-        try {
-            // В библиотеке метод называется именно queryButch — оставлено как есть.
-            return $this->oem->queryButch($commands);
-        } catch (\Throwable $e) {
-            throw new RuntimeException('OEM batch request failed: '.$e->getMessage(), 0, $e);
-        }
+        return $k;
     }
 }
