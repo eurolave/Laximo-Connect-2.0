@@ -71,15 +71,15 @@ final class LaximoClient
         return $this->normalize($res);
     }
 
-    /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
-    public function listUnits(string $catalog, string $vehicleId, string $ssd, int $categoryId): array
-    {
-        $res = $this->oem->queryButch([
-            OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId)
-        ]);
-        return $this->normalize($res);
-    }
-
+   /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
+public function listUnits(string $catalog, string $vehicleId, string $ssd, string $categoryId): array
+{
+    // ВАЖНО: передаём categoryId как строку — библиотека этого требует
+    $res = $this->oem->queryButch([
+        OemCmd::listUnits($catalog, $vehicleId, $ssd, (string)$categoryId),
+    ]);
+    return $this->normalize($res);
+}
     /** Универсальная нормализация в «чистый» массив для JSON */
     private function normalize(mixed $v): mixed
     {
