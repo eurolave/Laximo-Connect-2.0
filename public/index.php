@@ -15,6 +15,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 const JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
 
+/** tiny helpers */
 function respond(array $payload, int $code = 200): never {
     http_response_code($code);
     echo json_encode($payload, JSON_FLAGS);
@@ -36,7 +37,9 @@ function q(string $key, ?string $default = null): ?string {
     return trim((string)$val);
 }
 
-/** ─────────────── Optional CORS (env flag) ─────────────── */
+/**
+ * ──────────────────────── Optional CORS (env flag) ────────────────────────
+ */
 if (($_ENV['ENABLE_CORS'] ?? getenv('ENABLE_CORS') ?: '') === '1') {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, OPTIONS');
@@ -47,23 +50,29 @@ if (($_ENV['ENABLE_CORS'] ?? getenv('ENABLE_CORS') ?: '') === '1') {
     }
 }
 
-/** ─────────────── Load .env if present ─────────────── */
+/**
+ * ─────────────────────── Load .env if present ───────────────────────
+ */
 try {
     $root = dirname(__DIR__);
-    if (is_file($root.'/.env')) {
+    if (is_file($root . '/.env')) {
         Dotenv::createImmutable($root)->load();
     }
 } catch (Throwable $e) {
     error_log('dotenv load warning: ' . $e->getMessage());
 }
 
-/** ─────────────── Read credentials ─────────────── */
+/**
+ * ──────────────────────── Read credentials ────────────────────────
+ */
 $login = $_ENV['LAXIMO_LOGIN']    ?? getenv('LAXIMO_LOGIN')    ?: '';
 $pass  = $_ENV['LAXIMO_PASSWORD'] ?? getenv('LAXIMO_PASSWORD') ?: '';
 
 $path = get_path();
 
-/** ─────────────── Diagnostic routes ─────────────── */
+/**
+ * ─────────────────────── Diagnostic routes ───────────────────────
+ */
 if ($path === '/_diag/creds') {
     $mask = static function (string $s): string {
         $len = strlen($s);
@@ -126,15 +135,21 @@ if ($path === '/health') {
     ok(['php' => PHP_VERSION]);
 }
 
-/** ─────────────── Guard: credentials present ─────────────── */
+/**
+ * ─────────────────── Guard: credentials present ───────────────────
+ */
 if ($login === '' || $pass === '') {
     fail('Laximo credentials missing (LAXIMO_LOGIN/LAXIMO_PASSWORD)', 500);
 }
 
-/** ─────────────── App client ─────────────── */
+/**
+ * ─────────────────────────── App client ───────────────────────────
+ */
 $client = new LaximoClient($login, $pass);
 
-/** ─────────────── Routes ─────────────── */
+/**
+ * ─────────────────────────── Routes ───────────────────────────
+ */
 try {
     if ($path === '/vin') {
         $vin    = q('vin', '');
@@ -149,71 +164,94 @@ try {
         $catalog = q('catalog', '');
         $oem     = q('oem', '');
         $locale  = q('locale', 'ru_RU') ?? 'ru_RU';
+
         if ($catalog === '' || $oem === '') {
             fail('catalog and oem are required', 400);
         }
+
         $data = $client->findApplicableVehicles($catalog, $oem, $locale);
-        ok(['catalog' => $catalog, 'oem' => $oem, 'locale' => $locale, 'data' => $data]);
+        ok([
+            'catalog' => $catalog,
+            'oem'     => $oem,
+            'locale'  => $locale,
+            'data'    => $data,
+        ]);
 
     } elseif ($path === '/categories') {
         $catalog   = q('catalog', '');
         $vehicleId = q('vehicleId', '0') ?? '0';
         $ssd       = q('ssd', '');
         $all       = q('all'); // ?all=1 -> полный список
+
         if ($catalog === '' || $ssd === '') {
             fail('catalog and ssd are required', 400);
         }
+
         if ($all === '1') {
             $data = $client->listCategoriesAll($catalog, $vehicleId, $ssd);
         } else {
             $data = $client->listCategories($catalog, $vehicleId, $ssd);
         }
-        ok(['catalog' => $catalog, 'vehicleId' => $vehicleId, 'data' => $data]);
+
+        ok([
+            'catalog'   => $catalog,
+            'vehicleId' => $vehicleId,
+            'data'      => $data,
+        ]);
 
     } elseif ($path === '/units') {
-    $catalog    = q('catalog', '');
-    $vehicleId  = q('vehicleId', '0') ?? '0';
-    $ssd        = q('ssd', '');
-    $categoryId = q('categoryId', null);
+        $catalog    = q('catalog', '');
+        $vehicleId  = q('vehicleId', '0') ?? '0';
+        $ssd        = q('ssd', '');
+        $categoryId = q('categoryId', null);
 
-    if ($catalog === '' || $ssd === '') {
-        fail('catalog and ssd are required', 400);
-    }
-    // Требуем непустую строку; без приведения к int!
-    if ($categoryId === null || $categoryId === '') {
-        fail('categoryId is required (string)', 400);
-    }
+        if ($catalog === '' || $ssd === '') {
+            fail('catalog and ssd are required', 400);
+        }
+        // Требуем непустую строку; без приведения к int!
+        if ($categoryId === null || $categoryId === '') {
+            fail('categoryId is required (string)', 400);
+        }
 
-    $data = $client->listUnits($catalog, $vehicleId, $ssd, (string)$categoryId);
+        $categoryId = (string)$categoryId;
+        $data = $client->listUnits($catalog, $vehicleId, $ssd, $categoryId);
 
-    ok([
-        'catalog'    => $catalog,
-        'vehicleId'  => $vehicleId,
-        'categoryId' => (string)$categoryId,
-        'data'       => $data,
-    ]);
-}
+        ok([
+            'catalog'    => $catalog,
+            'vehicleId'  => $vehicleId,
+            'categoryId' => $categoryId,
+            'data'       => $data,
+        ]);
+
     } elseif ($path === '/oem') {
         $article = q('article', '');
-        $brand   = q('brand');
+        $brand   = q('brand'); // may be null/empty
+
         if ($article === '') {
             fail('article required', 400);
         }
+
         $data = $client->findOem($article, $brand ?: null);
-        ok(['data' => $data, 'article' => $article, 'brand' => $brand]);
+        ok([
+            'data'    => $data,
+            'article' => $article,
+            'brand'   => $brand,
+        ]);
 
     } elseif ($path === '/diag') {
         $oem   = new \GuayaquilLib\ServiceOem($login, $pass);
         $cats  = $oem->listCatalogs();
         $count = is_array($cats) ? count($cats) : 0;
+
         error_log('diag: listCatalogs count=' . $count);
+
         ok([
-            'service'         => 'laximo',
-            'php'             => PHP_VERSION,
-            'soap'            => extension_loaded('soap'),
-            'login_set'       => (bool) $login,
-            'catalogs_count'  => $count,
-            'catalogs'        => $cats,
+            'service'        => 'laximo',
+            'php'            => PHP_VERSION,
+            'soap'           => extension_loaded('soap'),
+            'login_set'      => (bool) $login,
+            'catalogs_count' => $count,
+            'catalogs'       => $cats,
         ]);
 
     } else {
