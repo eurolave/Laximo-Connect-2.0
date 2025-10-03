@@ -171,19 +171,28 @@ try {
         ok(['catalog' => $catalog, 'vehicleId' => $vehicleId, 'data' => $data]);
 
     } elseif ($path === '/units') {
-        $catalog    = q('catalog', '');
-        $vehicleId  = q('vehicleId', '0') ?? '0';
-        $ssd        = q('ssd', '');
-        $categoryId = q('categoryId', null);
-        if ($catalog === '' || $ssd === '') {
-            fail('catalog and ssd are required', 400);
-        }
-        if ($categoryId === null || !is_numeric($categoryId)) {
-            fail('categoryId is required (int)', 400);
-        }
-        $data = $client->listUnits($catalog, $vehicleId, $ssd, (int)$categoryId);
-        ok(['catalog' => $catalog, 'vehicleId' => $vehicleId, 'categoryId' => (int)$categoryId, 'data' => $data]);
+    $catalog    = q('catalog', '');
+    $vehicleId  = q('vehicleId', '0') ?? '0';
+    $ssd        = q('ssd', '');
+    $categoryId = q('categoryId', null);
 
+    if ($catalog === '' || $ssd === '') {
+        fail('catalog and ssd are required', 400);
+    }
+    // Требуем непустую строку; без приведения к int!
+    if ($categoryId === null || $categoryId === '') {
+        fail('categoryId is required (string)', 400);
+    }
+
+    $data = $client->listUnits($catalog, $vehicleId, $ssd, (string)$categoryId);
+
+    ok([
+        'catalog'    => $catalog,
+        'vehicleId'  => $vehicleId,
+        'categoryId' => (string)$categoryId,
+        'data'       => $data,
+    ]);
+}
     } elseif ($path === '/oem') {
         $article = q('article', '');
         $brand   = q('brand');
