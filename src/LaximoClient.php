@@ -21,27 +21,23 @@ final class LaximoClient
         $this->debug = (\getenv('LOG_LEVEL') === 'debug');
     }
 
-    /** ───────────── Каталоги ───────────── */
     public function listCatalogs(string $locale = 'ru_RU'): array
     {
         $res = $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
         return $this->normalize($res);
     }
 
-    /** ───────────── VIN ───────────── */
     public function findByVin(string $vin, string $locale = 'ru_RU'): array
     {
         $res = $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
         return $this->normalize($res);
     }
 
-    /** Алиас, который вызывает findByVin — чтобы index.php мог звать его напрямую */
     public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
     {
         return $this->findByVin($vin, $locale);
     }
 
-    /** ───────────── Applicable по артикулу ───────────── */
     public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
     {
         $res = $this->oem->queryButch([ OemCmd::findVehicleByOem($catalog, $oem, $locale) ]);
@@ -57,7 +53,7 @@ final class LaximoClient
 
     /** ───────────── Категории / Узлы ───────────── */
 
-    /** Список категорий */
+    /** Список категорий: listCategories(catalog, vehicleId, ssd) */
     public function listCategories(string $catalog, string $vehicleId, string $ssd): array
     {
         $res = $this->oem->queryButch([
@@ -66,7 +62,7 @@ final class LaximoClient
         return $this->normalize($res);
     }
 
-    /** Полный список категорий (иерархия) — -1 в 4-м параметре */
+    /** Полный список категорий (иерархия): четвёртым аргументом передаём -1 */
     public function listCategoriesAll(string $catalog, string $vehicleId, string $ssd): array
     {
         $res = $this->oem->queryButch([
@@ -75,51 +71,17 @@ final class LaximoClient
         return $this->normalize($res);
     }
 
-    /** Узлы в категории */
+    /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
     public function listUnits(string $catalog, string $vehicleId, string $ssd, string $categoryId): array
     {
+        // ВАЖНО: передаём categoryId как строку — библиотека этого требует
         $res = $this->oem->queryButch([
             OemCmd::listUnits($catalog, $vehicleId, $ssd, (string)$categoryId),
         ]);
         return $this->normalize($res);
     }
 
-    /**
-     * ───────────── Детали узла по SSD ─────────────
-     * Возвращает:
-     *  - unitInfo: инфо по узлу/схеме
-     *  - parts: массив позиций/деталей
-     *
-     * Если в вашей версии GuayaquilLib названия отличаются, замените
-     * getUnitInfo → getUnit / getUnitBySsd, listUnitParts → getUnitParts.
-     */
-    public function getUnitBySsd(string $catalog, string $vehicleId, string $ssd, string $locale = 'ru_RU'): array
-    {
-        $batch = [
-            OemCmd::getUnitInfo($catalog, $vehicleId, $ssd, $locale),   // или getUnit / getUnitBySsd
-            OemCmd::listUnitParts($catalog, $vehicleId, $ssd, $locale), // или getUnitParts
-        ];
-
-        $res  = $this->oem->queryButch($batch);
-        $norm = $this->normalize($res);
-
-        // Приводим к стабильным ключам
-        $unitInfo = $norm['unitInfo']     ?? $norm['GetUnitInfo']     ?? ($norm[0] ?? []);
-        $partsRaw = $norm['unitParts']    ?? $norm['ListUnitParts']   ?? ($norm[1] ?? []);
-
-        // Плоский массив деталей
-        $parts =
-            (is_array($partsRaw) && isset($partsRaw['parts']) && is_array($partsRaw['parts'])) ? $partsRaw['parts'] :
-            ((is_array($partsRaw) && isset($partsRaw[0])) ? $partsRaw : []);
-
-        return [
-            'unitInfo' => $unitInfo,
-            'parts'    => $parts,
-        ];
-    }
-
-    /** ───────────── Нормализация ───────────── */
-
+    /** Универсальная нормализация в «чистый» массив для JSON */
     private function normalize(mixed $v): mixed
     {
         if ($v instanceof SimpleXMLElement) {
@@ -149,6 +111,7 @@ final class LaximoClient
         return $v;
     }
 
+    /** Чистим служебные префиксы приватных свойств: "\0*\0prop" → "prop" */
     private function cleanKey(string|int $k): string|int
     {
         if (!is_string($k)) return $k;
