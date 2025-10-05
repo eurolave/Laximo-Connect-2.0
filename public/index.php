@@ -199,15 +199,7 @@ try {
             'data'      => $data,
         ]);
 
-    } elseif ($path === '/units') {
-        $catalog    = q('catalog', '');
-        $vehicleId  = q('vehicleId', '0') ?? '0';
-        $ssd        = q('ssd', '');
-        $categoryId = q('categoryId', null);
-
-        if ($catalog === '' || $ssd === '') {
-            fail('catalog and ssd are required', 400);
-        } elseif ($path === '/unit') {
+   } elseif ($path === '/unit') {
         $catalog   = q('catalog', '');
         $vehicleId = q('vehicleId', '0') ?? '0';
         $ssd       = q('ssd', '');
