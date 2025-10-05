@@ -207,7 +207,30 @@ try {
 
         if ($catalog === '' || $ssd === '') {
             fail('catalog and ssd are required', 400);
+        } elseif ($path === '/unit') {
+        $catalog   = q('catalog', '');
+        $vehicleId = q('vehicleId', '0') ?? '0';
+        $ssd       = q('ssd', '');
+        $locale    = q('locale', 'ru_RU') ?? 'ru_RU';
+
+        if ($catalog === '' || $ssd === '') {
+            fail('catalog and ssd are required', 400);
         }
+
+        // Получаем ИНФО по узлу и СПИСОК деталей по ssd узла
+        $data = $client->getUnitBySsd($catalog, $vehicleId, $ssd, $locale);
+
+        ok([
+            'catalog'   => $catalog,
+            'vehicleId' => $vehicleId,
+            'ssd'       => $ssd,
+            'locale'    => $locale,
+            'data'      => $data,
+        ]);
+
+
+
+        
         // Требуем непустую строку; без приведения к int!
         if ($categoryId === null || $categoryId === '') {
             fail('categoryId is required (string)', 400);
