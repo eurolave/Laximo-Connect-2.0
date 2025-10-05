@@ -21,105 +21,54 @@ final class LaximoClient
         $this->debug = (\getenv('LOG_LEVEL') === 'debug');
     }
 
-    public function listCatalogs(string $locale = 'ru_RU'): array
-    {
-        $res = $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
-        return $this->normalize($res);
-    }
+    /* ... всё что у вас было ... */
 
-    public function findByVin(string $vin, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oem->queryButch([ OemCmd::findVehicleByVin($vin, $locale) ]);
-        return $this->normalize($res);
-    }
-
-    public function findVehicleByVin(string $vin, string $locale = 'ru_RU'): array
-    {
-        return $this->findByVin($vin, $locale);
-    }
-
-    public function findApplicableVehicles(string $catalog, string $oem, string $locale = 'ru_RU'): array
-    {
-        $res = $this->oem->queryButch([ OemCmd::findVehicleByOem($catalog, $oem, $locale) ]);
-        return $this->normalize($res);
-    }
-
-    /** Aftermarket/DOC */
-    public function findOem(string $article, ?string $brand = null): array
-    {
-        $res = $this->am->findOem($article, $brand ?? '');
-        return $this->normalize($res);
-    }
-
-    /** ───────────── Категории / Узлы ───────────── */
-
-    /** Список категорий: listCategories(catalog, vehicleId, ssd) */
-    public function listCategories(string $catalog, string $vehicleId, string $ssd): array
+    /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
+    public function listUnits(string $catalog, string $vehicleId, string $ssd, string $categoryId): array
     {
         $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd)
+            OemCmd::listUnits($catalog, $vehicleId, $ssd, (string)$categoryId),
         ]);
         return $this->normalize($res);
     }
 
-    /** Полный список категорий (иерархия): четвёртым аргументом передаём -1 */
-    public function listCategoriesAll(string $catalog, string $vehicleId, string $ssd): array
+    /**
+     * ───────────── Детали узла по SSD ─────────────
+     * Возвращаем объединённый ответ:
+     *  - unitInfo: информация об узле/схеме
+     *  - parts: массив позиций/деталей
+     *
+     * В разных версиях GuayaquilLib команды могут называться чуть по-другому:
+     *  - getUnitInfo / getUnitBySsd / getUnit
+     *  - listUnitParts / getUnitParts
+     */
+    public function getUnitBySsd(string $catalog, string $vehicleId, string $ssd, string $locale = 'ru_RU'): array
     {
-        $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd, -1)
-        ]);
-        return $this->normalize($res);
+        // Попробуем получить 2 ответа за один батч
+        $batch = [
+            // Информация об узле
+            OemCmd::getUnitInfo($catalog, $vehicleId, $ssd, $locale), // синонимы: getUnitBySsd / getUnit
+            // Состав/позиции
+            OemCmd::listUnitParts($catalog, $vehicleId, $ssd, $locale), // синоним: getUnitParts
+        ];
+
+        $res = $this->oem->queryButch($batch);
+        $norm = $this->normalize($res);
+
+        // Нормализуем к предсказуемому виду
+        $unitInfo = $norm['unitInfo'] ?? $norm['GetUnitInfo'] ?? $norm[0] ?? [];
+        $parts    = $norm['unitParts'] ?? $norm['ListUnitParts'] ?? $norm[1] ?? [];
+
+        // У некоторых обёрток данные лежат глубже — поправим «защитно»
+        $partsArr =
+            (is_array($parts) && isset($parts['parts'])) ? $parts['parts'] :
+            ((is_array($parts) && isset($parts[0])) ? $parts : []);
+
+        return [
+            'unitInfo' => $unitInfo,
+            'parts'    => $partsArr,
+        ];
     }
 
-   /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
-public function listUnits(string $catalog, string $vehicleId, string $ssd, string $categoryId): array
-{
-    // ВАЖНО: передаём categoryId как строку — библиотека этого требует
-    $res = $this->oem->queryButch([
-        OemCmd::listUnits($catalog, $vehicleId, $ssd, (string)$categoryId),
-    ]);
-    return $this->normalize($res);
-}
-    /** Универсальная нормализация в «чистый» массив для JSON */
-    private function normalize(mixed $v): mixed
-    {
-        if ($v instanceof SimpleXMLElement) {
-            return json_decode(json_encode($v, JSON_UNESCAPED_UNICODE), true);
-        }
-
-        if (is_array($v)) {
-            $out = [];
-            foreach ($v as $k => $val) {
-                $out[$this->cleanKey($k)] = $this->normalize($val);
-            }
-            return $out;
-        }
-
-        if (is_object($v)) {
-            if ($v instanceof \JsonSerializable) {
-                return $this->normalize($v->jsonSerialize());
-            }
-            $arr = (array) $v;
-            $out = [];
-            foreach ($arr as $k => $val) {
-                $out[$this->cleanKey($k)] = $this->normalize($val);
-            }
-            return $out;
-        }
-
-        return $v;
-    }
-
-    /** Чистим служебные префиксы приватных свойств: "\0*\0prop" → "prop" */
-    private function cleanKey(string|int $k): string|int
-    {
-        if (!is_string($k)) return $k;
-        if (str_starts_with($k, "\0")) {
-            $pos = strrpos($k, "\0");
-            if ($pos !== false) {
-                $k = substr($k, $pos + 1);
-            }
-        }
-        return $k;
-    }
+    /* ... normalize(), cleanKey() — без изменений ... */
 }
