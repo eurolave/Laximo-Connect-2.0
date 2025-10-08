@@ -90,38 +90,36 @@ final class LaximoClient
      * Узлы по выбранной категории (ListUnits).
      * ВАЖНО: $ssd — это SSD категории (НЕ SSD юнита).
      */
-    public function listUnits(
-        string $catalog,
-        string $vehicleId,
-        string $ssd,
-        string|int $categoryId,
-        string $locale = 'ru_RU'
-    ): array {
-        $res = $this->oem->queryButch([
-            OemCmd::listUnits($catalog, $vehicleId, $ssd, (int)$categoryId, $locale)
-        ]);
-        return $this->normalize($res);
-    }
+    // Узлы: listUnits(catalog, vehicleId, ssd, categoryId, locale)
+public function listUnits(
+    string $catalog,
+    string $vehicleId,
+    string $ssd,
+    string $categoryId,
+    string $locale = 'ru_RU'
+): array {
+    // ВАЖНО: categoryId передаём как СТРОКУ — без (int)!
+    $res = $this->oem->queryButch([
+        OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId, $locale),
+    ]);
+    return $this->normalize($res);
+}
 
-    /**
-     * Детали конкретного узла (ListDetailByUnit) по UnitId.
-     * ВАЖНО: $contextSsd — это SSD текущего уровня (обычно SSD категории, с которым вызывали ListUnits).
-     * НЕ передавайте сюда $unit->ssd — он часто «другой» и не подходит контексту.
-     */
-    public function listDetailByUnit(
-        string $catalog,
-        string $vehicleId,
-        string $contextSsd,
-        string|int $unitId,
-        string $locale = 'ru_RU',
-        bool $localized = true,
-        bool $withLinks = true
-    ): array {
-        $res = $this->oem->queryButch([
-            OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, (int)$unitId, $locale, $localized, $withLinks)
-        ]);
-        return $this->normalize($res);
-    }
+// Детали узла: listDetailByUnit(...)
+public function listDetailByUnit(
+    string $catalog,
+    string $vehicleId,
+    string $contextSsd,
+    string $unitId,            // <- тоже строкой, чтобы не ловить подобную ошибку
+    string $locale = 'ru_RU',
+    bool $localized = true,
+    bool $withLinks = true
+): array {
+    $res = $this->oem->queryButch([
+        OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, $unitId, $locale, $localized, $withLinks),
+    ]);
+    return $this->normalize($res);
+}
 
     /** ───────────── Нормализация ───────────── */
 
