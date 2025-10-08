@@ -109,14 +109,14 @@ public function listUnits(
 public function listDetailByUnit(
     string $catalog,
     string $vehicleId,
-    string $contextSsd,
-    string $unitId,            // <- тоже строкой, чтобы не ловить подобную ошибку
+    string $contextSsd,   // SSD категории/уровня (не unit->ssd)
+    string $unitId,
     string $locale = 'ru_RU',
     bool $localized = true,
     bool $withLinks = true
 ): array {
     $res = $this->oem->queryButch([
-        OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, $unitId, $locale, $localized, $withLinks),
+        OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, $unitId, $locale, $localized, $withLinks)
     ]);
     return $this->normalize($res);
 }
