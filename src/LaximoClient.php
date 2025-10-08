@@ -21,6 +21,8 @@ final class LaximoClient
         $this->debug = (\getenv('LOG_LEVEL') === 'debug');
     }
 
+    /** ─────────── Базовые вызовы ─────────── */
+
     public function listCatalogs(string $locale = 'ru_RU'): array
     {
         $res = $this->oem->queryButch([ OemCmd::listCatalogs($locale) ]);
@@ -51,43 +53,87 @@ final class LaximoClient
         return $this->normalize($res);
     }
 
-    /** ───────────── Категории / Узлы ───────────── */
+    /** ───────────── Категории / Узлы / Детали ───────────── */
 
-    /** Список категорий: listCategories(catalog, vehicleId, ssd) */
-    public function listCategories(string $catalog, string $vehicleId, string $ssd): array
-    {
+    /**
+     * Список корневых/текущих категорий (по SSD уровня).
+     * Обычно SSD берём из ответа findByVin (root SSD).
+     */
+    public function listCategories(
+        string $catalog,
+        string $vehicleId,
+        string $ssd,
+        string $locale = 'ru_RU'
+    ): array {
         $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd)
+            OemCmd::listCategories($catalog, $vehicleId, $ssd, /*CategoryId*/ null, $locale)
         ]);
         return $this->normalize($res);
     }
 
-    /** Полный список категорий (иерархия): четвёртым аргументом передаём -1 */
-    public function listCategoriesAll(string $catalog, string $vehicleId, string $ssd): array
-    {
+    /**
+     * Полный список категорий (иерархия) — CategoryId = -1.
+     */
+    public function listCategoriesAll(
+        string $catalog,
+        string $vehicleId,
+        string $ssd,
+        string $locale = 'ru_RU'
+    ): array {
         $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd, -1)
+            OemCmd::listCategories($catalog, $vehicleId, $ssd, -1, $locale)
         ]);
         return $this->normalize($res);
     }
 
-    /** Узлы: listUnits(catalog, vehicleId, ssd, categoryId) */
-    public function listUnits(string $catalog, string $vehicleId, string $ssd, string $categoryId): array
-    {
-        // ВАЖНО: передаём categoryId как строку — библиотека этого требует
+    /**
+     * Узлы по выбранной категории (ListUnits).
+     * ВАЖНО: $ssd — это SSD категории (НЕ SSD юнита).
+     */
+    public function listUnits(
+        string $catalog,
+        string $vehicleId,
+        string $ssd,
+        string|int $categoryId,
+        string $locale = 'ru_RU'
+    ): array {
         $res = $this->oem->queryButch([
-            OemCmd::listUnits($catalog, $vehicleId, $ssd, (string)$categoryId),
+            OemCmd::listUnits($catalog, $vehicleId, $ssd, (int)$categoryId, $locale)
         ]);
         return $this->normalize($res);
     }
+
+    /**
+     * Детали конкретного узла (ListDetailByUnit) по UnitId.
+     * ВАЖНО: $contextSsd — это SSD текущего уровня (обычно SSD категории, с которым вызывали ListUnits).
+     * НЕ передавайте сюда $unit->ssd — он часто «другой» и не подходит контексту.
+     */
+    public function listDetailByUnit(
+        string $catalog,
+        string $vehicleId,
+        string $contextSsd,
+        string|int $unitId,
+        string $locale = 'ru_RU',
+        bool $localized = true,
+        bool $withLinks = true
+    ): array {
+        $res = $this->oem->queryButch([
+            OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, (int)$unitId, $locale, $localized, $withLinks)
+        ]);
+        return $this->normalize($res);
+    }
+
+    /** ───────────── Нормализация ───────────── */
 
     /** Универсальная нормализация в «чистый» массив для JSON */
     private function normalize(mixed $v): mixed
     {
+        // 1) SimpleXMLElement → массив
         if ($v instanceof SimpleXMLElement) {
             return json_decode(json_encode($v, JSON_UNESCAPED_UNICODE), true);
         }
 
+        // 2) Массив → рекурсивно
         if (is_array($v)) {
             $out = [];
             foreach ($v as $k => $val) {
@@ -96,10 +142,13 @@ final class LaximoClient
             return $out;
         }
 
+        // 3) Объект → раскрываем свойства (в т.ч. приватные), чистим ключи, рекурсивно
         if (is_object($v)) {
+            // Попробуем jsonSerialize(), если есть
             if ($v instanceof \JsonSerializable) {
                 return $this->normalize($v->jsonSerialize());
             }
+            // В противном случае раскрываем объект в массив
             $arr = (array) $v;
             $out = [];
             foreach ($arr as $k => $val) {
@@ -108,6 +157,7 @@ final class LaximoClient
             return $out;
         }
 
+        // 4) Скаляр/NULL
         return $v;
     }
 
@@ -115,6 +165,7 @@ final class LaximoClient
     private function cleanKey(string|int $k): string|int
     {
         if (!is_string($k)) return $k;
+        // Убираем префиксы приватных/защищённых свойств: "\0*\0" или "\0Class\0"
         if (str_starts_with($k, "\0")) {
             $pos = strrpos($k, "\0");
             if ($pos !== false) {
