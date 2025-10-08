@@ -200,28 +200,30 @@ try {
         ]);
 
     } elseif ($path === '/units') {
-        $catalog    = q('catalog', '');
-        $vehicleId  = q('vehicleId', '0') ?? '0';
-        $ssd        = q('ssd', '');
-        $categoryId = q('categoryId', null);
+    $catalog    = q('catalog', '');
+    $vehicleId  = q('vehicleId', '0') ?? '0';
+    $ssd        = q('ssd', '');
+    $categoryId = q('categoryId', null);
+    $locale     = q('locale', 'ru_RU') ?? 'ru_RU';
 
-        if ($catalog === '' || $ssd === '') {
-            fail('catalog and ssd are required', 400);
-        }
-        // Требуем непустую строку; без приведения к int!
-        if ($categoryId === null || $categoryId === '') {
-            fail('categoryId is required (string)', 400);
-        }
+    if ($catalog === '' || $ssd === '') {
+        fail('catalog and ssd are required', 400);
+    }
+    // Требуем непустую строку; без приведения к int!
+    if ($categoryId === null || $categoryId === '') {
+        fail('categoryId is required (string)', 400);
+    }
 
-        $categoryId = (string)$categoryId;
-        $data = $client->listUnits($catalog, $vehicleId, $ssd, $categoryId);
+    // В Laximo client порядок: listUnits($catalog, $vehicleId, $categorySsd, $categoryId, $locale)
+    $data = $client->listUnits($catalog, $vehicleId, $ssd, (string)$categoryId, $locale);
 
-        ok([
-            'catalog'    => $catalog,
-            'vehicleId'  => $vehicleId,
-            'categoryId' => $categoryId,
-            'data'       => $data,
-        ]);
+    ok([
+        'catalog'    => $catalog,
+        'vehicleId'  => $vehicleId,
+        'categoryId' => (string)$categoryId,
+        'locale'     => $locale,
+        'data'       => $data,
+    ]);
 
     } elseif ($path === '/oem') {
         $article = q('article', '');
