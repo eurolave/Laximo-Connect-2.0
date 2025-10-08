@@ -108,18 +108,18 @@ public function listUnits(
 // Детали узла: listDetailByUnit(...)
 public function listDetailByUnit(
     string $catalog,
-    string $vehicleId,
-    string $contextSsd,   // SSD категории/уровня (не unit->ssd)
+    string $vehicleId,     // не используется этой командой — оставляем для совместимости сигнатур
+    string $contextSsd,    // SSD уровня (категории), с которым вызывали ListUnits
     string $unitId,
     string $locale = 'ru_RU',
-    bool $localized = true,
-    bool $withLinks = true
+    bool $localized = true,   // в либе и так 'true'
+    bool $withLinks = true    // в либе и так 'true'
 ): array {
+    // ВАЖНО: listPartsByUnit принимает (catalog, ssd, unitId, locale)
     $res = $this->oem->queryButch([
-        OemCmd::listDetailByUnit($catalog, $vehicleId, $contextSsd, $unitId, $locale, $localized, $withLinks)
+        OemCmd::listPartsByUnit($catalog, $contextSsd, $unitId, $locale),
     ]);
     return $this->normalize($res);
-}
 
     /** ───────────── Нормализация ───────────── */
 
