@@ -53,26 +53,28 @@ final class LaximoClient
         return $this->normalize($res);
     }
 
-    /** ───────────── Категории / Узлы / Детали ───────────── */
+        /** ───────────── Категории / Узлы / Детали ───────────── */
 
     /**
-     * Список корневых/текущих категорий (по SSD уровня).
-     * Обычно SSD берём из ответа findByVin (root SSD).
+     * Список категорий по текущему уровню.
+     * По умолчанию берём первый уровень: CategoryId='0'.
+     * Для полной иерархии см. listCategoriesAll().
      */
     public function listCategories(
         string $catalog,
         string $vehicleId,
         string $ssd,
-        string $locale = 'ru_RU'
+        string $locale = 'ru_RU',
+        string $categoryId = '0'
     ): array {
         $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd, /*CategoryId*/ null, $locale)
+            OemCmd::listCategories($catalog, $vehicleId, $ssd, $categoryId, $locale)
         ]);
         return $this->normalize($res);
     }
 
     /**
-     * Полный список категорий (иерархия) — CategoryId = -1.
+     * Полная иерархия категорий — CategoryId = '-1'.
      */
     public function listCategoriesAll(
         string $catalog,
@@ -81,7 +83,7 @@ final class LaximoClient
         string $locale = 'ru_RU'
     ): array {
         $res = $this->oem->queryButch([
-            OemCmd::listCategories($catalog, $vehicleId, $ssd, -1, $locale)
+            OemCmd::listCategories($catalog, $vehicleId, $ssd, '-1', $locale)
         ]);
         return $this->normalize($res);
     }
@@ -90,36 +92,38 @@ final class LaximoClient
      * Узлы по выбранной категории (ListUnits).
      * ВАЖНО: $ssd — это SSD категории (НЕ SSD юнита).
      */
-    // Узлы: listUnits(catalog, vehicleId, ssd, categoryId, locale)
-public function listUnits(
-    string $catalog,
-    string $vehicleId,
-    string $ssd,
-    string $categoryId,
-    string $locale = 'ru_RU'
-): array {
-    // ВАЖНО: categoryId передаём как СТРОКУ — без (int)!
-    $res = $this->oem->queryButch([
-        OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId, $locale),
-    ]);
-    return $this->normalize($res);
-}
+    public function listUnits(
+        string $catalog,
+        string $vehicleId,
+        string $ssd,
+        string $categoryId,
+        string $locale = 'ru_RU'
+    ): array {
+        // Библиотека ждёт строку для CategoryId — без (int)!
+        $res = $this->oem->queryButch([
+            OemCmd::listUnits($catalog, $vehicleId, $ssd, $categoryId, $locale),
+        ]);
+        return $this->normalize($res);
+    }
 
-// Детали узла: listDetailByUnit(...)
-public function listDetailByUnit(
-    string $catalog,
-    string $vehicleId,     // не используется этой командой — оставляем для совместимости сигнатур
-    string $contextSsd,    // SSD уровня (категории), с которым вызывали ListUnits
-    string $unitId,
-    string $locale = 'ru_RU',
-    bool $localized = true,   // в либе и так 'true'
-    bool $withLinks = true    // в либе и так 'true'
-): array {
-    // ВАЖНО: listPartsByUnit принимает (catalog, ssd, unitId, locale)
-    $res = $this->oem->queryButch([
-        OemCmd::listPartsByUnit($catalog, $contextSsd, $unitId, $locale),
-    ]);
-    return $this->normalize($res);
+    /**
+     * Детали узла (ListDetailByUnit) — в твоей либе это listPartsByUnit().
+     * Используем SSD уровня (категории), с которым вызывали ListUnits, и UnitId.
+     */
+    public function listDetailByUnit(
+        string $catalog,
+        string $vehicleId,   // не используется самой командой, оставлен для совместимости
+        string $contextSsd,
+        string $unitId,
+        string $locale = 'ru_RU',
+        bool $localized = true, // в либе и так 'true'
+        bool $withLinks = true  // в либе и так 'true'
+    ): array {
+        $res = $this->oem->queryButch([
+            OemCmd::listPartsByUnit($catalog, $contextSsd, $unitId, $locale),
+        ]);
+        return $this->normalize($res);
+    }
 
     /** ───────────── Нормализация ───────────── */
 
@@ -142,11 +146,9 @@ public function listDetailByUnit(
 
         // 3) Объект → раскрываем свойства (в т.ч. приватные), чистим ключи, рекурсивно
         if (is_object($v)) {
-            // Попробуем jsonSerialize(), если есть
             if ($v instanceof \JsonSerializable) {
                 return $this->normalize($v->jsonSerialize());
             }
-            // В противном случае раскрываем объект в массив
             $arr = (array) $v;
             $out = [];
             foreach ($arr as $k => $val) {
@@ -163,7 +165,6 @@ public function listDetailByUnit(
     private function cleanKey(string|int $k): string|int
     {
         if (!is_string($k)) return $k;
-        // Убираем префиксы приватных/защищённых свойств: "\0*\0" или "\0Class\0"
         if (str_starts_with($k, "\0")) {
             $pos = strrpos($k, "\0");
             if ($pos !== false) {
