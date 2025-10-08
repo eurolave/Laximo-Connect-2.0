@@ -225,6 +225,41 @@ try {
         'data'       => $data,
     ]);
 
+} elseif ($path === '/unit-details') {
+    $catalog    = q('catalog', '');
+    $vehicleId  = q('vehicleId', '0') ?? '0';
+    $unitId     = q('unitId', '');
+    $ssd        = q('ssd', ''); // ВАЖНО: SSD уровня (категории), с которым вызывали /units
+    $locale     = q('locale', 'ru_RU') ?? 'ru_RU';
+    $localized  = (q('localized', 'true') ?? 'true') !== 'false';
+    $withLinks  = (q('withLinks', 'true') ?? 'true') !== 'false';
+
+    if ($catalog === '' || $unitId === '' || $ssd === '') {
+        fail('catalog, unitId and ssd are required', 400);
+    }
+
+    // Вызываем именно ListDetailByUnit
+    $data = $client->listDetailByUnit(
+        $catalog,
+        $vehicleId,
+        $ssd,                 // SSD контекста (категории)
+        (string)$unitId,      // строкой
+        $locale,
+        $localized,
+        $withLinks
+    );
+
+    ok([
+        'catalog'    => $catalog,
+        'vehicleId'  => $vehicleId,
+        'unitId'     => (string)$unitId,
+        'locale'     => $locale,
+        'data'       => $data,
+    ]);
+
+
+
+        
     } elseif ($path === '/oem') {
         $article = q('article', '');
         $brand   = q('brand'); // may be null/empty
